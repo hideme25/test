@@ -1,48 +1,173 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Approval API Test</title>
+    <title>Approval API Session Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        button { padding: 10px 20px; cursor: pointer; margin-right: 8px; }
+        pre { background: #f1f1f1; padding: 15px; white-space: pre-wrap; word-break: break-all; }
+    </style>
 </head>
 <body>
 
-    <h3>Approval API Test</h3>
+    <h3>Approval API Session Test</h3>
 
     <button id="checkBtn">Check Session</button>
+    <button id="sendBtn">Send PATCH Request</button>
 
     <pre id="result">Waiting...</pre>
 
     <script>
-        const API_URL =
+        const API_PATH =
             "/api/v1/approvals/user-approvals/approve-reject-newuser/true/UA4374";
 
-        const result = document.getElementById("result");
+        const out = document.getElementById("result");
 
+        function print(obj) {
+            out.textContent =
+                typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+        }
+
+        /* ---------- read + normalize the auth object ---------- */
+        function readAuth() {
+            const raw = localStorage.getItem("auth");
+            if (!raw) {
+                throw new Error(
+                    "Auth object not found in this origin (" +
+                    location.origin + "). " +
+                    "Open this page on the same origin as the app."
+                );
+            }
+
+            let parsed;
+            try {
+                parsed = JSON.parse(raw);
+            } catch (e) {
+                throw new Error("Invalid auth JSON: " + e.message);
+            }
+
+            // handles a double-encoded value, e.g. "\"{\\\"isAuth\\\":true}\""
+            if (typeof parsed === "string") {
+                try { parsed = JSON.parse(parsed); }
+                catch (e) { throw new Error("Invalid auth JSON (2nd parse): " + e.message); }
+            }
+
+            if (!parsed || typeof parsed !== "object") {
+                throw new Error("Auth object is not an object.");
+            }
+            return parsed;
+        }
+
+        function getSession() {
+            const auth = readAuth();
+            const t = auth?.tokens?.prism360 || {};
+            return {
+                authenticated: auth.isAuth === true,
+                accessToken:  t.tokenId,        // -> Authorization: Bearer ...
+                refreshToken: t.refreshTokenId, // -> X-Refresh-Token: ...
+                userUid:      t.userUid,        // -> X-Validate-Token: ...
+                user: auth?.user || null
+            };
+        }
+
+        /* ---------- 1) session check (no request sent) ---------- */
         document.getElementById("checkBtn").addEventListener("click", () => {
+            try {
+                const s = getSession();
+                print({
+                    origin: location.origin,
+                    endpoint: API_PATH,
+                    method: "PATCH",
+                    body: { rejectReason: null },
+                    session: {
+                        authenticated: s.authenticated,
+                        bearerTokenAvailable: !!s.accessToken,
+                        refreshTokenAvailable: !!s.refreshToken,
+                        validateTokenAvailable: !!s.userUid,
+                        user: s.user ? { uid: s.user.uid, email: s.user.email, name: s.user.name } : null
+                    }
+                });
+            } catch (e) {
+                print("ERROR: " + e.message);
+            }
+        });
 
-            const refreshToken =
-                localStorage.getItem("refreshTokenId");
+        /* ---------- 2) actually send the PATCH ---------- */
+        document.getElementById("sendBtn").addEventListener("click", async () => {
+            const btn = document.getElementById("sendBtn");
+            btn.disabled = true;
 
-            const bearerToken =
-                localStorage.getItem("tokenId");
+            try {
+                const s = getSession();
 
-            const validateToken =
-                localStorage.getItem("userUid");
+                if (!s.authenticated)  throw new Error("auth.isAuth is not true — not logged in.");
+                if (!s.accessToken)    throw new Error("tokens.prism360.tokenId is missing (Bearer token).");
+                if (!s.refreshToken)   throw new Error("tokens.prism360.refreshTokenId is missing (X-Refresh-Token).");
+                if (!s.userUid)        throw new Error("tokens.prism360.userUid is missing (X-Validate-Token).");
 
-            result.textContent = JSON.stringify({
-                endpoint: API_URL,
-                method: "PATCH",
-                body: {
-                    rejectReason: null
-                },
-                tokensAvailable: {
-                    refreshTokenId: !!refreshToken,
-                    tokenId: !!bearerToken,
-                    userUid: !!validateToken
+                const headers = {
+                    "Accept": "application/json, text/plain, */*",
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " + s.accessToken,
+                    "X-Refresh-Token": s.refreshToken,
+                    "X-Validate-Token": s.userUid,
+                    // harmless extra header, keeps ngrok tunnels from serving the warning page
+                    "Ngrok-Skip-Browser-Warning": "69420"
+                    // NOTE: do NOT set Origin / Referer / Sec-Fetch-* / User-Agent —
+                    // the browser owns those and will reject or ignore them.
+                };
+
+                const body = JSON.stringify({ rejectReason: null });
+
+                print({
+                    phase: "sending",
+                    request: {
+                        method: "PATCH",
+                        url: new URL(API_PATH, location.origin).href,
+                        headers: { ...headers, Authorization: "Bearer " + s.accessToken.slice(0, 4) + "…" },
+                        body: body
+                    }
+                });
+
+                const res = await fetch(API_PATH, {
+                    method: "PATCH",
+                    headers: headers,
+                    body: body,
+                    credentials: "include",  // same-origin: sends cookies too, harmless
+                    mode: "same-origin"
+                });
+
+                const text = await res.text();
+                let parsed;
+                try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+
+                print({
+                    ok: res.ok,
+                    status: res.status,
+                    statusText: res.statusText,
+                    url: res.url,
+                    redirected: res.redirected,
+                    responseHeaders: Object.fromEntries(res.headers.entries()),
+                    body: parsed
+                });
+
+                if (res.status === 401 || res.status === 403) {
+                    console.warn("Auth rejected — the access token may be expired. " +
+                                 "Re-login or refresh the session, then reload this page.");
                 }
-            }, null, 2);
+
+            } catch (e) {
+                // "Failed to fetch" here = network block / not same-origin / server down
+                print("REQUEST FAILED\n" + e.name + ": " + e.message +
+                      "\n\nIf this says 'Failed to fetch', check that:\n" +
+                      " • this page is served from " + location.origin + "\n" +
+                      " • the request is not blocked by an extension / CSP\n" +
+                      " • the API host is up");
+            } finally {
+                btn.disabled = false;
+            }
         });
     </script>
 
