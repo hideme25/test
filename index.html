@@ -4,50 +4,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Request Test</title>
+    <title>Approval API Test</title>
 </head>
 <body>
 
-    <h3>User Approval API Test</h3>
+    <h3>Approval API Test</h3>
 
-    <button id="cancelBtn">Cancel</button>
+    <button id="checkBtn">Check Session</button>
 
-    <pre id="result"></pre>
+    <pre id="result">Waiting...</pre>
 
     <script>
-        const button = document.getElementById("cancelBtn");
+        const API_URL =
+            "/api/v1/approvals/user-approvals/approve-reject-newuser/true/UA4374";
+
         const result = document.getElementById("result");
 
-        button.addEventListener("click", async function () {
+        document.getElementById("checkBtn").addEventListener("click", () => {
 
-            if (!confirm("Are you sure you want to send this request?")) {
-                return;
-            }
+            const refreshToken =
+                localStorage.getItem("refreshTokenId");
 
-            try {
-                const response = await fetch(
-                    "/api/v1/approvals/user-approvals/approve-reject-newuser/true/UA4374",
-                    {
-                        method: "PATCH",
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
-                        credentials: "same-origin",
-                        body: JSON.stringify({
-                            rejectReason: null
-                        })
-                    }
-                );
+            const bearerToken =
+                localStorage.getItem("tokenId");
 
-                const responseText = await response.text();
+            const validateToken =
+                localStorage.getItem("userUid");
 
-                result.textContent =
-                    "HTTP Status: " + response.status +
-                    "\nResponse:\n" + responseText;
-
-            } catch (error) {
-                result.textContent = "Request failed: " + error.message;
-            }
+            result.textContent = JSON.stringify({
+                endpoint: API_URL,
+                method: "PATCH",
+                body: {
+                    rejectReason: null
+                },
+                tokensAvailable: {
+                    refreshTokenId: !!refreshToken,
+                    tokenId: !!bearerToken,
+                    userUid: !!validateToken
+                }
+            }, null, 2);
         });
     </script>
 
