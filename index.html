@@ -1,0 +1,55 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Request Test</title>
+</head>
+<body>
+
+    <h3>User Approval API Test</h3>
+
+    <button id="cancelBtn">Cancel</button>
+
+    <pre id="result"></pre>
+
+    <script>
+        const button = document.getElementById("cancelBtn");
+        const result = document.getElementById("result");
+
+        button.addEventListener("click", async function () {
+
+            if (!confirm("Are you sure you want to send this request?")) {
+                return;
+            }
+
+            try {
+                const response = await fetch(
+                    "/api/v1/approvals/user-approvals/approve-reject-newuser/true/UA4374",
+                    {
+                        method: "PATCH",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        credentials: "same-origin",
+                        body: JSON.stringify({
+                            rejectReason: null
+                        })
+                    }
+                );
+
+                const responseText = await response.text();
+
+                result.textContent =
+                    "HTTP Status: " + response.status +
+                    "\nResponse:\n" + responseText;
+
+            } catch (error) {
+                result.textContent = "Request failed: " + error.message;
+            }
+        });
+    </script>
+
+</body>
+</html>
